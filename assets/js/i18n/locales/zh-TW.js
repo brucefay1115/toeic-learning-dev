@@ -9,6 +9,8 @@ export default {
     "settingsClear": "一鍵清除",
     "settingsGetApiKey": "點此取得 Google API Key",
     "settingsLocalStorageNote": "Key 僅儲存於本地裝置 (IndexedDB)，不會備份到 Google Drive",
+    "announcementTitle": "公告",
+    "announcementMessage": "提醒大家，因本英文 App 的所有資料儲存於使用者的瀏覽器中 (IndexedDB)，如您清除瀏覽器資料，可能會造成資料遺失！建議您清除資料前先登入 Google 進行資料備份，也請您隨時保持備份。",
     "tabsLearn": "學習",
     "tabsPractice": "練習",
     "tabsVocab": "單字本",

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'toeic-tutor-v1.2.6';
+const CACHE_NAME = 'toeic-tutor-v1.2.7';
 
 const STATIC_ASSETS = [
   './manifest.json',
@@ -60,7 +60,6 @@ self.addEventListener('fetch', (event) => {
   if (
     url.includes('generativelanguage.googleapis.com') ||
     url.includes('version.json') ||
-    url.includes('announcement.json') ||
     url.includes('accounts.google.com') ||
     url.includes('googleapis.com/drive') ||
     url.includes('googleapis.com/oauth')

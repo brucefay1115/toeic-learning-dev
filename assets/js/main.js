@@ -211,11 +211,6 @@ const announcementTitleEl = document.getElementById('announcementTitle');
 const announcementMessageEl = document.getElementById('announcementMessage');
 const localeSelect = document.getElementById('localeSelect');
 const APP_VERSION_CACHE_KEY = 'app_version_display';
-const ANNOUNCEMENT_CACHE_KEY = 'app_announcement_payload';
-const DEFAULT_ANNOUNCEMENT = {
-    title: '公告',
-    message: '提醒大家，因本英文 App 的所有資料儲存於使用者的瀏覽器中 (IndexedDB)，如您清除瀏覽器資料，可能會造成資料遺失！建議您清除資料前先登入 Google 進行資料備份，也請您隨時保持備份。'
-};
 
 function populateLocaleSelector() {
     if (!localeSelect) return;
@@ -232,6 +227,7 @@ function populateLocaleSelector() {
 function applyLocaleToUI() {
     applyTranslations(document);
     document.title = t('appTitle');
+    setAnnouncementContent();
     renderVoiceOptions();
     renderSpeakingLevelSwitch();
     const activeTopicChip = document.querySelector('#speakingPresetGroup .topic-chip.active');
@@ -304,44 +300,13 @@ function setAppVersionText(text) {
     if (el) el.textContent = text;
 }
 
-function normalizeAnnouncement(data) {
-    if (!data || typeof data !== 'object') return null;
-    const title = typeof data.title === 'string' ? data.title.trim() : '';
-    const message = typeof data.message === 'string' ? data.message.trim() : '';
-    if (!title || !message) return null;
-    return { title, message };
-}
-
-function setAnnouncementContent(data) {
-    const payload = normalizeAnnouncement(data) || DEFAULT_ANNOUNCEMENT;
-    if (announcementTitleEl) announcementTitleEl.textContent = payload.title;
-    if (announcementMessageEl) announcementMessageEl.textContent = payload.message;
+function setAnnouncementContent() {
+    if (announcementTitleEl) announcementTitleEl.textContent = t('announcementTitle');
+    if (announcementMessageEl) announcementMessageEl.textContent = t('announcementMessage');
 }
 
 function initAnnouncementContent() {
-    const cachedRaw = safeLocalGet(ANNOUNCEMENT_CACHE_KEY);
-    if (cachedRaw) {
-        try {
-            const cached = normalizeAnnouncement(JSON.parse(cachedRaw));
-            if (cached) setAnnouncementContent(cached);
-        } catch {
-            // Ignore broken cache and continue with fallback + network.
-        }
-    } else {
-        setAnnouncementContent(DEFAULT_ANNOUNCEMENT);
-    }
-
-    fetch('./announcement.json?t=' + Date.now())
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        const normalized = normalizeAnnouncement(data);
-        if (!normalized) return;
-        setAnnouncementContent(normalized);
-        safeLocalSet(ANNOUNCEMENT_CACHE_KEY, JSON.stringify(normalized));
-      })
-      .catch(() => {
-        if (!cachedRaw) setAnnouncementContent(DEFAULT_ANNOUNCEMENT);
-      });
+    setAnnouncementContent();
 }
 
 function initPostLocalePrompts() {

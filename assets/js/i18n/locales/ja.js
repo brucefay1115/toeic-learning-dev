@@ -9,6 +9,8 @@ export default {
     "settingsClear": "クリア",
     "settingsGetApiKey": "Google API Key を取得",
     "settingsLocalStorageNote": "Key は端末の IndexedDB のみに保存され、Google Drive にはバックアップされません。",
+    "announcementTitle": "お知らせ",
+    "announcementMessage": "この英語アプリのデータはすべてユーザーのブラウザ（IndexedDB）に保存されます。ブラウザデータを削除すると学習データが失われる可能性があります。削除前に Google にログインしてバックアップを行い、普段から定期的にバックアップしてください。",
     "tabsLearn": "学習",
     "tabsPractice": "練習",
     "tabsVocab": "単語帳",

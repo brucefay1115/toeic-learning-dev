@@ -9,6 +9,8 @@ export default {
     "settingsClear": "지우기",
     "settingsGetApiKey": "Google API Key 받기",
     "settingsLocalStorageNote": "Key는 로컬 기기(IndexedDB)에만 저장되며 Google Drive에 백업되지 않습니다.",
+    "announcementTitle": "공지",
+    "announcementMessage": "이 영어 앱의 모든 데이터는 사용자의 브라우저(IndexedDB)에 저장됩니다. 브라우저 데이터를 삭제하면 학습 데이터가 손실될 수 있습니다. 데이터를 지우기 전에 Google 로그인 후 백업을 진행하고, 평소에도 수시로 백업해 주세요.",
     "tabsLearn": "학습",
     "tabsPractice": "연습",
     "tabsVocab": "단어장",
