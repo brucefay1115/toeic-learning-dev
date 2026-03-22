@@ -299,7 +299,9 @@ h1 { font-size: 20px; margin: 0; font-weight: 700; color: var(--primary); }
 
 .phrase-list { list-style: none; padding: 0; }
 .phrase-card { background: white; margin-bottom: 12px; padding: 16px; border-radius: 16px; border-left: 5px solid var(--primary); box-shadow: 0 2px 10px rgba(0,0,0,0.03); }
-.phrase-header { font-size: 17px; font-weight: 700; color: var(--primary); margin-bottom: 6px; display: flex; align-items: center; }
+.phrase-header { font-size: 17px; font-weight: 700; color: var(--primary); margin-bottom: 6px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.phrase-header-text { flex: 1; min-width: 0; }
+.phrase-header .phrase-save-btn { margin-left: auto; flex-shrink: 0; }
 .phrase-meaning { font-size: 15px; color: var(--text-main); margin-bottom: 6px; }
 .phrase-explanation { font-size: 14px; color: var(--text-sub); margin-bottom: 8px; line-height: 1.5; }
 .phrase-example { font-style: italic; font-size: 14px; color: #555; padding-left: 10px; border-left: 2px solid var(--primary-light); display: flex; align-items: center; }
@@ -321,6 +323,7 @@ h1 { font-size: 20px; margin: 0; font-weight: 700; color: var(--primary); }
 .wm-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
 .wm-word { font-size: 32px; font-weight: 800; color: var(--text-main); }
 .wm-meta { color: var(--text-sub); margin-bottom: 20px; font-size: 18px; }
+.wm-verb-forms { font-size: 15px; color: var(--text-main); margin: -8px 0 14px; line-height: 1.45; }
 .wm-def { font-size: 20px; margin-bottom: 20px; }
 .wm-btn {
     background: var(--primary); color: white; border: none;
@@ -619,6 +622,12 @@ h1 { font-size: 20px; margin: 0; font-weight: 700; color: var(--primary); }
     flex-wrap: wrap;
     gap: 6px;
     margin: 4px 0 8px;
+}
+.vocab-lookup-verb-forms {
+    font-size: 14px;
+    color: var(--text-main);
+    margin: 0 0 8px;
+    line-height: 1.45;
 }
 .vocab-lookup-ex {
     margin-top: 8px;

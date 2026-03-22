@@ -266,10 +266,10 @@
         </div>
         <div id="vocabLookupPanel" class="hidden">
             <div class="vocab-lookup-input-wrap">
-                <input type="text" id="vocabLookupInput" class="topic-input vocab-lookup-input" data-i18n-placeholder="vocabLookupPlaceholder" placeholder="輸入英文單字，例如: negotiate">
+                <input type="text" id="vocabLookupInput" class="topic-input vocab-lookup-input" data-i18n-placeholder="vocabLookupPlaceholder" placeholder="輸入英文單字或片語，例如: look forward to">
                 <button class="generate-btn vocab-lookup-btn" id="btnVocabLookup" data-i18n="vocabLookupBtn">查詢</button>
             </div>
-            <p class="vocab-lookup-hint" data-i18n="vocabLookupHint">可查詢單字解釋、例句，並直接加入 SRS 單字本。</p>
+            <p class="vocab-lookup-hint" data-i18n="vocabLookupHint">可查詢單字或常用片語、例句，並加入 SRS 單字本複習。</p>
             <div id="vocabLookupResult"></div>
         </div>
     </div>
@@ -373,6 +373,7 @@
             <button class="large-speaker" id="btnWordAudio"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg></button>
         </div>
         <div class="wm-meta"><span id="wmPos">n.</span> <span id="wmIpa">/IPA/</span></div>
+        <div id="wmVerbForms" class="wm-verb-forms hidden" aria-live="polite"></div>
         <div class="wm-def" id="wmDef">Definition</div>
         <div style="font-style: italic; color: #666; margin-bottom: 6px; display: flex; align-items: center;" id="wmEx">
             <span id="wmExText">Example.</span>

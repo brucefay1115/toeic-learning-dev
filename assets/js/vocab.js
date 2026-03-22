@@ -2,7 +2,7 @@
 
 import { state, ICONS, SRS_INTERVALS, SRS_MIN_WORDS, SRS_MAX_WORDS, getNextReviewTime } from './state.js';
 import { DB } from './db.js';
-import { fetchWordDetails, validateWordWithLanguageTool } from './apiGemini.js';
+import { fetchWordDetails, fetchPhraseDetails, validateWordWithLanguageTool } from './apiGemini.js';
 import { speakText } from './utils.js';
 import { t } from './i18n.js';
 
@@ -17,6 +17,40 @@ function escapeHtml(text) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+}
+
+const LOOKUP_TOKEN_RE = /^[A-Za-z]+(?:['-][A-Za-z]+)*$/;
+
+function setModalVerbForms(vocabItem) {
+    const el = document.getElementById('wmVerbForms');
+    if (!el) return;
+    const vf = vocabItem?.verb_forms;
+    if (!vf || typeof vf !== 'object') {
+        el.classList.add('hidden');
+        el.textContent = '';
+        return;
+    }
+    const base = String(vf.base || '').trim();
+    const past = String(vf.past || '').trim();
+    const pp = String(vf.past_participle || '').trim();
+    if (!base && !past && !pp) {
+        el.classList.add('hidden');
+        el.textContent = '';
+        return;
+    }
+    el.classList.remove('hidden');
+    el.textContent = `${t('vocabVerbFormsLabel')} ${base} · ${past} · ${pp}`;
+}
+
+function verbFormsHtmlBlock(item) {
+    const vf = item?.verb_forms;
+    if (!vf || typeof vf !== 'object') return '';
+    const base = String(vf.base || '').trim();
+    const past = String(vf.past || '').trim();
+    const pp = String(vf.past_participle || '').trim();
+    if (!base && !past && !pp) return '';
+    const line = `${t('vocabVerbFormsLabel')} ${base} · ${past} · ${pp}`;
+    return `<div class="vocab-lookup-verb-forms">${escapeHtml(line)}</div>`;
 }
 
 export function setSrsTrigger(fn) { _startSrsReview = fn; }
@@ -59,10 +93,11 @@ function showWordModal(word) {
         let vocabItem = null;
         if (state.currentData && state.currentData.vocabulary)
             vocabItem = state.currentData.vocabulary.find(v => v.word.toLowerCase() === word.toLowerCase());
+        const cacheKey = normalizeWordId(word);
         if (vocabItem) {
-            DB.setWord(word, vocabItem);
+            DB.setWord(cacheKey, vocabItem);
         } else {
-            vocabItem = await DB.getWord(word);
+            vocabItem = await DB.getWord(cacheKey);
         }
         if (!vocabItem) {
             const saved = await DB.getSavedWord(normalizeWordId(word));
@@ -88,6 +123,7 @@ function showWordModal(word) {
             const exZhEl = document.getElementById('wmExZh');
             if (vocabItem.ex_zh) { exZhEl.textContent = vocabItem.ex_zh; exZhEl.classList.remove('hidden'); }
             else { exZhEl.classList.add('hidden'); }
+            setModalVerbForms(vocabItem);
             await renderSaveButton(actionArea, word, vocabItem);
         } else {
             document.getElementById('wmPos').innerText = '';
@@ -95,6 +131,7 @@ function showWordModal(word) {
             document.getElementById('wmDef').innerText = t('vocabNoDetails');
             document.getElementById('wmEx').classList.add('hidden');
             document.getElementById('wmExZh').classList.add('hidden');
+            setModalVerbForms(null);
             const genBtn = document.createElement('button');
             genBtn.className = 'wm-btn';
             genBtn.style.marginTop = '0';
@@ -113,6 +150,7 @@ function showWordModal(word) {
                     const exZhEl = document.getElementById('wmExZh');
                     if (info.ex_zh) { exZhEl.textContent = info.ex_zh; exZhEl.classList.remove('hidden'); }
                     else { exZhEl.classList.add('hidden'); }
+                    setModalVerbForms(info);
                     await backfillSavedWordExample(word, info);
                     genBtn.remove();
                     await renderSaveButton(actionArea, word, info);
@@ -125,21 +163,50 @@ function showWordModal(word) {
 }
 
 export function normalizeWordId(word) {
-    return String(word || '').trim().toLowerCase();
+    return String(word || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-function normalizeLookupWord(word) {
-    return String(word || '').trim();
+function normalizeLookupInput(raw) {
+    return String(raw || '').trim().replace(/\s+/g, ' ');
 }
 
-function validateLookupWordInput(rawWord) {
-    const word = normalizeLookupWord(rawWord);
-    if (!word) return { ok: false, reason: 'required' };
-    if (/\s/.test(word)) return { ok: false, reason: 'single_word_only' };
-    if (/\d/.test(word)) return { ok: false, reason: 'digits_not_allowed' };
-    if (!/^[A-Za-z]+$/.test(word)) return { ok: false, reason: 'invalid_chars' };
-    if (word.length < 2 || word.length > 32) return { ok: false, reason: 'invalid_length' };
-    return { ok: true, word: word.toLowerCase() };
+function validateLookupToken(token) {
+    return LOOKUP_TOKEN_RE.test(token);
+}
+
+export function validateLookupQuery(raw) {
+    const q = normalizeLookupInput(raw);
+    if (!q) return { ok: false, reason: 'required' };
+    if (/\d/.test(q)) return { ok: false, reason: 'digits_not_allowed' };
+    const tokens = q.split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) return { ok: false, reason: 'required' };
+    if (tokens.length === 1) {
+        const word = tokens[0];
+        if (!validateLookupToken(word)) return { ok: false, reason: 'invalid_chars' };
+        if (word.length < 2 || word.length > 32) return { ok: false, reason: 'invalid_length' };
+        return { ok: true, mode: 'word', query: word.toLowerCase() };
+    }
+    if (tokens.length > 8) return { ok: false, reason: 'phrase_too_many_words' };
+    if (q.length < 2 || q.length > 80) return { ok: false, reason: 'phrase_length_invalid' };
+    for (const tok of tokens) {
+        if (!validateLookupToken(tok)) return { ok: false, reason: 'phrase_token_invalid' };
+    }
+    return { ok: true, mode: 'phrase', query: tokens.map((tok) => tok.toLowerCase()).join(' ') };
+}
+
+export function phraseToVocabItem(p) {
+    const phrase = String(p.phrase || '').trim();
+    const meaning = String(p.meaning || '');
+    const explanation = String(p.explanation || '').trim();
+    const zh = explanation ? `${meaning} · ${explanation}` : meaning;
+    return {
+        word: phrase,
+        pos: 'phr.',
+        ipa: '',
+        def: zh,
+        ex: String(p.example || ''),
+        ex_zh: String(p.example_zh || '')
+    };
 }
 
 function renderLookupMessage(message) {
@@ -208,15 +275,23 @@ async function renderSaveButton(container, word, vocabItem, options = {}) {
     container.appendChild(btn);
 }
 
+function updateBookmarkBtn(btn, isSaved) {
+    if (!btn) return;
+    if (isSaved) { btn.innerHTML = ICONS.bookmarkFill; btn.classList.add('saved'); }
+    else { btn.innerHTML = ICONS.bookmark; btn.classList.remove('saved'); }
+}
+
 export function syncVocabCardBookmark(wordId, isSaved) {
-    document.querySelectorAll('#vocabList .vocab-card').forEach(card => {
+    const id = normalizeWordId(wordId);
+    document.querySelectorAll('[data-bookmark-id]').forEach((card) => {
+        if (normalizeWordId(card.dataset.bookmarkId) !== id) return;
+        updateBookmarkBtn(card.querySelector('.vocab-save-btn'), isSaved);
+    });
+    document.querySelectorAll('#vocabList .vocab-card').forEach((card) => {
+        if (card.dataset.bookmarkId && normalizeWordId(card.dataset.bookmarkId) === id) return;
         const wordEl = card.querySelector('.vocab-word');
-        if (wordEl && wordEl.textContent.toLowerCase() === wordId.toLowerCase()) {
-            const btn = card.querySelector('.vocab-save-btn');
-            if (btn) {
-                if (isSaved) { btn.innerHTML = ICONS.bookmarkFill; btn.classList.add('saved'); }
-                else { btn.innerHTML = ICONS.bookmark; btn.classList.remove('saved'); }
-            }
+        if (wordEl && normalizeWordId(wordEl.textContent) === id) {
+            updateBookmarkBtn(card.querySelector('.vocab-save-btn'), isSaved);
         }
     });
 }
@@ -262,6 +337,7 @@ function renderLookupResultCard() {
             ${pos ? `<span class="vocab-pos">${escapeHtml(pos)}</span>` : ''}
             ${ipa ? `<span class="vocab-ipa">${escapeHtml(ipa)}</span>` : ''}
         </div>
+        ${verbFormsHtmlBlock(item)}
         <div class="saved-word-zh">${escapeHtml(def)}</div>
         ${ex ? `<div class="vocab-lookup-ex">${escapeHtml(ex)} <button class="mini-speaker" data-action="speak-ex">${ICONS.speaker}</button></div>` : ''}
         ${exZh ? `<div class="vocab-ex-zh">${escapeHtml(exZh)}</div>` : ''}
@@ -282,13 +358,15 @@ export async function handleLookupSearch() {
     const inputEl = document.getElementById('vocabLookupInput');
     const lookupBtn = document.getElementById('btnVocabLookup');
     if (!inputEl) return;
-    const localValidation = validateLookupWordInput(inputEl.value);
+    const localValidation = validateLookupQuery(inputEl.value);
     if (!localValidation.ok) {
         _lookupResult = null;
         if (localValidation.reason === 'required') renderLookupMessage(t('vocabLookupInputRequired'));
-        else if (localValidation.reason === 'single_word_only') renderLookupMessage(t('vocabLookupSingleWordOnly'));
         else if (localValidation.reason === 'digits_not_allowed') renderLookupMessage(t('vocabLookupNoDigits'));
         else if (localValidation.reason === 'invalid_length') renderLookupMessage(t('vocabLookupLengthInvalid'));
+        else if (localValidation.reason === 'phrase_too_many_words') renderLookupMessage(t('vocabLookupPhraseTooManyWords'));
+        else if (localValidation.reason === 'phrase_length_invalid') renderLookupMessage(t('vocabLookupPhraseLengthInvalid'));
+        else if (localValidation.reason === 'phrase_token_invalid') renderLookupMessage(t('vocabLookupPhraseTokenInvalid'));
         else renderLookupMessage(t('vocabLookupCharsInvalid'));
         return;
     }
@@ -299,28 +377,33 @@ export async function handleLookupSearch() {
     if (lookupBtn?.disabled) return;
     if (lookupBtn) lookupBtn.disabled = true;
     try {
-        const query = localValidation.word;
-        renderLookupMessage(t('vocabLookupValidating'));
-        const lt = await validateWordWithLanguageTool(query);
-        if (!lt.ok) {
-            _lookupResult = null;
-            if (lt.reason === 'spelling') {
-                const suggestions = (lt.suggestions || []).slice(0, 3).join(', ');
-                renderLookupMessage(t('vocabLookupSpellingInvalid', { suggestions: suggestions || '-' }));
-            } else {
-                renderLookupMessage(t('vocabLookupValidationServiceError'));
+        const query = localValidation.query;
+        if (localValidation.mode === 'word') {
+            renderLookupMessage(t('vocabLookupValidating'));
+            const lt = await validateWordWithLanguageTool(query);
+            if (!lt.ok) {
+                _lookupResult = null;
+                if (lt.reason === 'spelling') {
+                    const suggestions = (lt.suggestions || []).slice(0, 3).join(', ');
+                    renderLookupMessage(t('vocabLookupSpellingInvalid', { suggestions: suggestions || '-' }));
+                } else {
+                    renderLookupMessage(t('vocabLookupValidationServiceError'));
+                }
+                return;
             }
-            return;
         }
         renderLookupMessage(t('loadingGenerating'));
-        const info = await fetchWordDetails(query);
+        const info = localValidation.mode === 'phrase'
+            ? await fetchPhraseDetails(query)
+            : await fetchWordDetails(query);
         _lookupResult = {
             word: info.word || query,
             pos: info.pos || '',
             ipa: info.ipa || '',
             def: info.def || '',
             ex: info.ex || '',
-            ex_zh: info.ex_zh || ''
+            ex_zh: info.ex_zh || '',
+            verb_forms: info.verb_forms || null
         };
         await backfillSavedWordExample(_lookupResult.word, _lookupResult);
         await renderVocabTab();

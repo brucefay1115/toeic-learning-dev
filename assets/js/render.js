@@ -3,7 +3,7 @@
 import { state, ICONS, VOICE_OPTIONS } from './state.js';
 import { DB } from './db.js';
 import { speakText } from './utils.js';
-import { addLongPressListener, toggleWordSaved } from './vocab.js';
+import { addLongPressListener, toggleWordSaved, phraseToVocabItem, normalizeWordId } from './vocab.js';
 import { audioEl, playBtn, ensureAudioReady } from './audioPlayer.js';
 import { t } from './i18n.js';
 
@@ -101,12 +101,13 @@ export function renderContent(data, voiceName) {
     vocabContainer.innerHTML = '';
     const vocabRows = (data.vocabulary || []).slice(0, 8);
     const savedWordsPromise = DB.getSavedWords()
-        .then((rows) => new Set((rows || []).map((row) => String(row.id || '').toLowerCase())))
+        .then((rows) => new Set((rows || []).map((row) => normalizeWordId(row.id))))
         .catch(() => new Set());
     vocabRows.forEach(v => {
         const card = document.createElement('div');
         card.className = 'vocab-card';
         const word = String(v.word || '');
+        card.dataset.bookmarkId = normalizeWordId(word);
         const pos = String(v.pos || '');
         const ipa = String(v.ipa || '');
         const def = String(v.def || '');
@@ -125,7 +126,7 @@ export function renderContent(data, voiceName) {
         });
         const saveBtn = card.querySelector('.vocab-save-btn');
         savedWordsPromise.then((savedSet) => {
-            if (savedSet.has(word.toLowerCase())) {
+            if (savedSet.has(normalizeWordId(word))) {
                 saveBtn.innerHTML = ICONS.bookmarkFill;
                 saveBtn.classList.add('saved');
             }
@@ -157,10 +158,29 @@ export function renderContent(data, voiceName) {
             const exampleZh = String(p.example_zh || '');
             const card = document.createElement('div');
             card.className = 'phrase-card';
-            card.innerHTML = `<div class="phrase-header">${escapeHtml(phrase)}<button class="mini-speaker" data-speak="${escapeHtml(phrase)}" style="margin-left:6px;">${ICONS.speaker}</button></div><div class="phrase-meaning">${escapeHtml(meaning)}</div><div class="phrase-explanation">${escapeHtml(explanation)}</div><div class="phrase-example">${escapeHtml(example)}<button class="mini-speaker" data-speak="${escapeHtml(example)}" style="margin-left:4px;">${ICONS.speaker}</button></div>${exampleZh ? `<div class="phrase-example-zh">${escapeHtml(exampleZh)}</div>` : ''}`;
+            card.dataset.bookmarkId = normalizeWordId(phrase);
+            const vocabLike = phraseToVocabItem(p);
+            card.innerHTML = `<div class="phrase-header"><span class="phrase-header-text">${escapeHtml(phrase)}</span><button class="mini-speaker" data-speak="${escapeHtml(phrase)}">${ICONS.speaker}</button><button class="vocab-save-btn phrase-save-btn" type="button">${ICONS.bookmark}</button></div><div class="phrase-meaning">${escapeHtml(meaning)}</div><div class="phrase-explanation">${escapeHtml(explanation)}</div><div class="phrase-example">${escapeHtml(example)}<button class="mini-speaker" data-speak="${escapeHtml(example)}" style="margin-left:4px;">${ICONS.speaker}</button></div>${exampleZh ? `<div class="phrase-example-zh">${escapeHtml(exampleZh)}</div>` : ''}`;
             card.querySelectorAll('[data-speak]').forEach((btn) => {
                 btn.onclick = () => speakText(btn.dataset.speak || '');
             });
+            const saveBtn = card.querySelector('.vocab-save-btn');
+            savedWordsPromise.then((savedSet) => {
+                if (savedSet.has(normalizeWordId(phrase))) {
+                    saveBtn.innerHTML = ICONS.bookmarkFill;
+                    saveBtn.classList.add('saved');
+                }
+            });
+            saveBtn.onclick = async () => {
+                const saved = await toggleWordSaved(phrase, vocabLike);
+                if (saved) {
+                    saveBtn.innerHTML = ICONS.bookmarkFill;
+                    saveBtn.classList.add('saved');
+                } else {
+                    saveBtn.innerHTML = ICONS.bookmark;
+                    saveBtn.classList.remove('saved');
+                }
+            };
             phraseContainer.appendChild(card);
         });
     } else if (data.grammar && data.grammar.length > 0) {

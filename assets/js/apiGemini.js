@@ -50,14 +50,33 @@ export async function fetchGeminiText(score, customTopic) {
     return fetchJsonFromPrompt(TEXT_MODEL, prompt);
 }
 
+function lexicalCacheKey(query) {
+    return String(query || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
 export async function fetchWordDetails(word) {
-    const cached = await DB.getWord(word);
+    const key = lexicalCacheKey(word);
+    const cached = await DB.getWord(key);
     if (cached) return cached;
     const locale = getLocaleMeta();
     const targetLang = `${locale.name} (${locale.inLocal})`;
-    const prompt = `Explain the word "${word}" for a TOEIC student. Keep it concise like a vocabulary card. Output JSON strictly: {"word":"${word}","pos":"part of speech (e.g. n./v./adj.)","ipa":"IPA symbol","def":"Brief ${targetLang} definition (one short phrase)","ex":"One simple short English example sentence.","ex_zh":"${targetLang} translation of the example sentence"}`;
+    const q = JSON.stringify(key);
+    const prompt = `Explain the English word ${q} for a TOEIC student. Keep it concise like a vocabulary card. Output JSON strictly with this shape: {"word":string (the headword, lowercase),"pos":"part of speech (e.g. n./v./adj./vi./vt.)","ipa":"IPA or empty string if unclear","def":"Brief ${targetLang} definition (one short phrase)","ex":"One simple short English example sentence.","ex_zh":"${targetLang} translation of the example sentence","verb_forms":null OR {"base":string,"past":string,"past_participle":string} — use verb_forms only when pos is a verb (v./vi./vt.); otherwise verb_forms must be null.}`;
     const result = await fetchJsonFromPrompt(TEXT_MODEL, prompt);
-    await DB.setWord(word, result);
+    await DB.setWord(key, result);
+    return result;
+}
+
+export async function fetchPhraseDetails(phrase) {
+    const key = lexicalCacheKey(phrase);
+    const cached = await DB.getWord(key);
+    if (cached) return cached;
+    const locale = getLocaleMeta();
+    const targetLang = `${locale.name} (${locale.inLocal})`;
+    const q = JSON.stringify(key);
+    const prompt = `Explain the English phrase or collocation ${q} for a TOEIC student. Keep it concise like a vocabulary card. Output JSON strictly: {"word":string (the phrase, natural casing ok but match input meaning),"pos":"phr.","ipa":"","def":"Brief ${targetLang} meaning (one short phrase)","ex":"One simple short English example sentence using the phrase.","ex_zh":"${targetLang} translation of the example sentence"}`;
+    const result = await fetchJsonFromPrompt(TEXT_MODEL, prompt);
+    await DB.setWord(key, result);
     return result;
 }
 
