@@ -932,6 +932,7 @@ GENERATE_BTN.onclick = async () => {
 /* ── App Init ── */
 (async function initApp() {
     initAppVersionDisplay();
+    registerServiceWorkerUpdater().catch(() => {});
 
     try {
         await DB.init();
@@ -966,8 +967,5 @@ GENERATE_BTN.onclick = async () => {
     } catch (e) { logError('Init failed', e); keyModal.classList.add('active'); }
     finally {
         window.dispatchEvent(new CustomEvent('toeic-app-ready'));
-        queueMicrotask(() => {
-            registerServiceWorkerUpdater().catch(() => {});
-        });
     }
 })();

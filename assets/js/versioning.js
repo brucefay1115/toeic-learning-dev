@@ -17,7 +17,7 @@ export function getBootVersionInfo() {
 
 export async function fetchVersionInfo(cacheBust = true) {
     const suffix = cacheBust ? `?t=${Date.now()}` : '';
-    const res = await fetch(`./version.json${suffix}`);
+    const res = await fetch(`./version.json${suffix}`, { cache: 'no-store' });
     if (!res.ok) throw new Error('Failed to fetch version.json');
     return normalizeVersionInfo(await res.json());
 }

@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'toeic-tutor-static';
-const CACHE_NAME = `${CACHE_PREFIX}-v13`;
+const CACHE_NAME = `${CACHE_PREFIX}-v14`;
 
 const STATIC_ASSETS = [
   './manifest.json',
@@ -42,7 +42,6 @@ self.addEventListener('install', (event) => {
     caches.delete(CACHE_NAME)
       .then(() => caches.open(CACHE_NAME))
       .then((cache) => cache.addAll(STATIC_ASSETS))
-      .then(() => self.skipWaiting())
   );
 });
 

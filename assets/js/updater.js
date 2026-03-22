@@ -13,9 +13,20 @@ import { fetchVersionInfo, getBootVersionInfo, normalizeVersionInfo } from './ve
 
 const UPDATE_ACK_VERSION_KEY = 'update_ack_version';
 const LEGACY_PENDING_KEY = 'update_ack_pending';
-const PENDING_SW_CHANGELOG_KEY = 'toeic_pending_sw_changelog';
-/** When set, SW already activated but reload was deferred until update modal is dismissed. */
-const DEFERRED_SW_RELOAD_KEY = 'toeic_sw_reload_deferred';
+const PENDING_UPDATE_INFO_KEY = 'toeic_pending_update_info';
+const ACTIVATION_APPROVED_KEY = 'toeic_sw_activation_approved';
+const UPDATE_CHECK_THROTTLE_MS = 30000;
+
+const updateState = {
+  acknowledgedVersion: null,
+  pendingInfo: null,
+  registration: null,
+  waitingWorker: null,
+  modalVisible: false,
+  reloadAuthorized: safeSessionGet(ACTIVATION_APPROVED_KEY) === '1',
+  isReloading: false,
+  lastUpdateCheckAt: 0
+};
 
 async function getAcknowledgedVersion() {
   try {
@@ -42,8 +53,142 @@ function migrateLegacyPendingKey() {
   safeLocalRemove(LEGACY_PENDING_KEY);
 }
 
-function showUpdateModal(info, { pendingSession = false } = {}) {
-  if (document.getElementById('updateOverlay')) return;
+function readPendingUpdateInfo() {
+  const raw = safeSessionGet(PENDING_UPDATE_INFO_KEY);
+  if (!raw) return null;
+  try {
+    return normalizeVersionInfo(JSON.parse(raw));
+  } catch {
+    safeSessionRemove(PENDING_UPDATE_INFO_KEY);
+    return null;
+  }
+}
+
+function storePendingUpdateInfo(info) {
+  const normalized = normalizeVersionInfo(info);
+  updateState.pendingInfo = normalized;
+  if (normalized) {
+    safeSessionSet(PENDING_UPDATE_INFO_KEY, JSON.stringify(normalized));
+    return normalized;
+  }
+  safeSessionRemove(PENDING_UPDATE_INFO_KEY);
+  return null;
+}
+
+function clearPendingUpdateInfo() {
+  updateState.pendingInfo = null;
+  safeSessionRemove(PENDING_UPDATE_INFO_KEY);
+}
+
+async function resolveLatestVersionInfo({ preferNetwork = true } = {}) {
+  let info = getBootVersionInfo();
+  if (!preferNetwork) return normalizeVersionInfo(info);
+
+  try {
+    const net = await fetchVersionInfo(true);
+    if (net) info = net;
+  } catch {
+    /* use boot-only */
+  }
+
+  return normalizeVersionInfo(info);
+}
+
+function getWaitingWorker(registration = updateState.registration) {
+  if (!registration) return null;
+  return registration.waiting || registration.installing || null;
+}
+
+function markReloadAuthorized(authorized) {
+  updateState.reloadAuthorized = authorized;
+  if (authorized) {
+    safeSessionSet(ACTIVATION_APPROVED_KEY, '1');
+    return;
+  }
+  safeSessionRemove(ACTIVATION_APPROVED_KEY);
+}
+
+function waitForWaitingWorker(timeoutMs = 4000) {
+  return new Promise((resolve) => {
+    const registration = updateState.registration;
+    if (!registration) {
+      resolve(null);
+      return;
+    }
+
+    if (registration.waiting) {
+      resolve(registration.waiting);
+      return;
+    }
+
+    const installing = registration.installing;
+    if (!installing) {
+      resolve(null);
+      return;
+    }
+
+    let settled = false;
+    const finish = (worker) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(worker || null);
+    };
+
+    const timer = setTimeout(() => finish(registration.waiting || null), timeoutMs);
+    installing.addEventListener('statechange', () => {
+      if (registration.waiting) {
+        finish(registration.waiting);
+        return;
+      }
+      if (installing.state === 'redundant') {
+        finish(null);
+      }
+    });
+  });
+}
+
+async function purgeAndReload() {
+  if (updateState.isReloading) return;
+  updateState.isReloading = true;
+  markReloadAuthorized(false);
+
+  try {
+    await purgeAppCaches();
+  } catch {
+    /* keep reload resilient */
+  }
+
+  window.location.reload();
+}
+
+async function applyApprovedUpdate() {
+  markReloadAuthorized(true);
+  updateState.waitingWorker = getWaitingWorker();
+
+  if (updateState.waitingWorker && updateState.registration?.waiting) {
+    autoActivate(updateState.waitingWorker);
+    return;
+  }
+
+  try {
+    await updateState.registration?.update();
+  } catch {
+    /* keep fallback resilient */
+  }
+
+  updateState.waitingWorker = await waitForWaitingWorker();
+  if (updateState.waitingWorker && updateState.registration?.waiting) {
+    autoActivate(updateState.waitingWorker);
+    return;
+  }
+
+  await purgeAndReload();
+}
+
+function showUpdateModal(info) {
+  if (updateState.modalVisible || document.getElementById('updateOverlay')) return;
+  updateState.modalVisible = true;
 
   const overlay = document.createElement('div');
   overlay.id = 'updateOverlay';
@@ -63,77 +208,54 @@ function showUpdateModal(info, { pendingSession = false } = {}) {
 
   document.body.appendChild(overlay);
 
-  document.getElementById('btnUpdateAck').addEventListener('click', () => {
-    setAcknowledgedVersion(info.version)
-      .catch(() => {})
-      .finally(async () => {
-        safeSessionRemove(PENDING_SW_CHANGELOG_KEY);
-        overlay.remove();
-        if (safeSessionGet(DEFERRED_SW_RELOAD_KEY)) {
-          safeSessionRemove(DEFERRED_SW_RELOAD_KEY);
-          try {
-            await purgeAppCaches();
-          } catch {
-            /* ignore */
-          }
-          window.location.reload();
-        }
-      });
+  const ackButton = document.getElementById('btnUpdateAck');
+  ackButton.addEventListener('click', async () => {
+    if (ackButton.disabled) return;
+    ackButton.disabled = true;
+
+    try {
+      await setAcknowledgedVersion(info.version);
+      updateState.acknowledgedVersion = info.version;
+      clearPendingUpdateInfo();
+      updateState.modalVisible = false;
+      overlay.remove();
+      await applyApprovedUpdate();
+    } catch (err) {
+      console.warn('Failed to save update acknowledgement:', err);
+      ackButton.disabled = false;
+    }
   });
 }
 
-async function maybeShowUpdateNotice() {
+async function maybeShowUpdateNotice({ preferNetwork = true } = {}) {
   migrateLegacyPendingKey();
 
   const ack = await getAcknowledgedVersion();
+  updateState.acknowledgedVersion = ack;
 
-  let pendingNorm = null;
-  const pendingRaw = safeSessionGet(PENDING_SW_CHANGELOG_KEY);
-  if (pendingRaw) {
-    try {
-      pendingNorm = normalizeVersionInfo(JSON.parse(pendingRaw));
-    } catch {
-      safeSessionRemove(PENDING_SW_CHANGELOG_KEY);
+  const pending = readPendingUpdateInfo();
+  if (pending) {
+    updateState.pendingInfo = pending;
+  }
+
+  const normalized = await resolveLatestVersionInfo({ preferNetwork });
+  const candidate = normalized || updateState.pendingInfo;
+
+  if (!candidate) return null;
+
+  if (candidate.version === ack) {
+    if (updateState.registration?.waiting) {
+      updateState.waitingWorker = updateState.registration.waiting;
+      markReloadAuthorized(true);
+      autoActivate(updateState.waitingWorker);
     }
+    clearPendingUpdateInfo();
+    return candidate;
   }
 
-  let info = getBootVersionInfo();
-  try {
-    const net = await fetchVersionInfo(true);
-    if (net) info = net;
-  } catch {
-    /* use boot-only */
-  }
-
-  const normalized = normalizeVersionInfo(info);
-
-  if (normalized && normalized.version === ack) {
-    safeSessionRemove(PENDING_SW_CHANGELOG_KEY);
-    return;
-  }
-
-  if (pendingNorm && pendingNorm.version !== ack) {
-    const useForModal =
-      normalized && normalized.version === pendingNorm.version
-        ? normalized
-        : !normalized && pendingNorm
-          ? pendingNorm
-          : null;
-
-    if (useForModal) {
-      showUpdateModal(useForModal, { pendingSession: true });
-      return;
-    }
-    if (normalized && normalized.version !== pendingNorm.version) {
-      safeSessionRemove(PENDING_SW_CHANGELOG_KEY);
-    }
-  }
-
-  if (!normalized) return;
-
-  if (normalized.version === ack) return;
-
-  showUpdateModal(normalized);
+  storePendingUpdateInfo(candidate);
+  showUpdateModal(candidate);
+  return candidate;
 }
 
 export function scheduleUpdateNoticeAfterAppReady() {
@@ -167,59 +289,36 @@ async function purgeAppCaches() {
   );
 }
 
-async function persistPendingChangelogBeforeReload() {
-  let info = getBootVersionInfo();
+async function triggerUpdateCheck({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && now - updateState.lastUpdateCheckAt < UPDATE_CHECK_THROTTLE_MS) return;
+  updateState.lastUpdateCheckAt = now;
+
   try {
-    const net = await fetchVersionInfo(true);
-    if (net) info = net;
+    await updateState.registration?.update();
   } catch {
-    /* use boot-only */
+    /* keep update checks resilient */
   }
-  const normalized = normalizeVersionInfo(info);
-  if (normalized) {
-    safeSessionSet(PENDING_SW_CHANGELOG_KEY, JSON.stringify(normalized));
-  }
+
+  maybeShowUpdateNotice({ preferNetwork: true }).catch(() => {});
 }
 
 export async function registerServiceWorkerUpdater() {
-  if (!('serviceWorker' in navigator)) return;
+  if (!('serviceWorker' in navigator) || updateState.registration) return;
 
-  let refreshing = false;
-
-  navigator.serviceWorker.addEventListener('controllerchange', async () => {
-    if (refreshing) return;
-    refreshing = true;
-
-    try {
-      await persistPendingChangelogBeforeReload();
-    } catch {
-      /* keep reload resilient */
-    }
-
-    // If the update modal is open, reloading would destroy it before the user taps ack.
-    // Defer purge+reload until ack (see showUpdateModal).
-    if (document.getElementById('updateOverlay')) {
-      safeSessionSet(DEFERRED_SW_RELOAD_KEY, '1');
-      refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!updateState.reloadAuthorized && safeSessionGet(ACTIVATION_APPROVED_KEY) !== '1') {
       return;
     }
-
-    try {
-      await purgeAppCaches();
-    } catch {
-      /* keep reload resilient */
-    }
-    window.location.reload();
+    purgeAndReload().catch(() => {});
   });
 
   try {
     const reg = await navigator.serviceWorker.register('./sw.js');
+    updateState.registration = reg;
+    updateState.waitingWorker = reg.waiting || null;
 
-    reg.update().catch(() => {});
-
-    if (reg.waiting) {
-      autoActivate(reg.waiting);
-    }
+    triggerUpdateCheck({ force: true }).catch(() => {});
 
     reg.addEventListener('updatefound', () => {
       const installing = reg.installing;
@@ -227,13 +326,18 @@ export async function registerServiceWorkerUpdater() {
 
       installing.addEventListener('statechange', () => {
         if (installing.state === 'installed' && navigator.serviceWorker.controller) {
-          autoActivate(installing);
+          updateState.waitingWorker = reg.waiting || installing;
+          if (updateState.reloadAuthorized) {
+            autoActivate(updateState.waitingWorker);
+            return;
+          }
+          maybeShowUpdateNotice({ preferNetwork: true }).catch(() => {});
         }
       });
     });
 
     const triggerUpdate = () => {
-      reg.update().catch(() => {});
+      triggerUpdateCheck().catch(() => {});
     };
 
     document.addEventListener('visibilitychange', () => {
