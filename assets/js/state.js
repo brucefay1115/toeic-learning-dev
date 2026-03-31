@@ -35,6 +35,9 @@ export const state = {
         finalTopic: '',
         level: 'intermediate',
         levelManuallySelected: false,
+        accent: 'random',
+        liveVoiceName: null,
+        resolvedAccentId: null,
         isConnected: false,
         isRecording: false,
         isResponding: false
@@ -67,7 +70,7 @@ export function getNextReviewTime(level) {
 
 export const TEXT_MODEL = "gemini-flash-latest";
 export const TTS_MODEL = "gemini-2.5-flash-preview-tts";
-export const LIVE_AUDIO_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025";
+export const LIVE_AUDIO_MODEL = "gemini-2.5-flash-native-audio-latest";
 
 export const VOICE_OPTIONS = [
     { name: 'random', labelKey: 'voiceOptionRandomLabel', descKey: 'voiceOptionRandomDesc' },
@@ -79,3 +82,12 @@ export const VOICE_OPTIONS = [
 ];
 
 export const VOICE_NAMES = VOICE_OPTIONS.filter(v => v.name !== 'random').map(v => v.name);
+
+/** Accent preset for live speaking (UI + prompt). `random` picks one of us/uk/au/in per session. */
+export const SPEAKING_ACCENT_OPTIONS = [
+    { id: 'us', labelKey: 'speakingAccentOptionUsLabel', descKey: 'speakingAccentOptionUsDesc' },
+    { id: 'uk', labelKey: 'speakingAccentOptionUkLabel', descKey: 'speakingAccentOptionUkDesc' },
+    { id: 'au', labelKey: 'speakingAccentOptionAuLabel', descKey: 'speakingAccentOptionAuDesc' },
+    { id: 'in', labelKey: 'speakingAccentOptionInLabel', descKey: 'speakingAccentOptionInDesc' },
+    { id: 'random', labelKey: 'speakingAccentOptionRandomLabel', descKey: 'speakingAccentOptionRandomDesc' }
+];

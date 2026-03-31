@@ -1,12 +1,22 @@
 // Live speaking session over Gemini native audio model (SDK mode).
 
 import { GoogleGenAI, Modality } from 'https://esm.run/@google/genai';
-import { LIVE_AUDIO_MODEL, state } from './state.js';
+import { LIVE_AUDIO_MODEL, state, VOICE_NAMES } from './state.js';
 import { t } from './i18n.js';
 import { SPEAKING_LEVELS, getSpeakingLevelByScore } from './speakingLevel.js';
 
 const INPUT_MIME = 'audio/pcm;rate=16000';
 const MEDIA_RESOLUTION_LOW = 'MEDIA_RESOLUTION_LOW'; // ~66-70 tokens/image
+
+const ACCENT_IDS = ['us', 'uk', 'au', 'in'];
+
+/** English instructions embedded in system/user prompts (model follows speaking style). */
+const ACCENT_INSTRUCTION = {
+    us: 'Speak with a General American English accent and natural US intonation. Prefer common US vocabulary and phrasing where it fits.',
+    uk: 'Speak with a British English accent (modern British/RP-style) and natural UK intonation. Prefer British vocabulary and phrasing where it fits (e.g. holiday, lift, flat).',
+    au: 'Speak with an Australian English accent and natural Australian intonation. Use Australian expressions only when they suit the learner level.',
+    in: 'Speak with a clear Indian English accent and rhythm. Use common Indian English expressions where natural for the context.'
+};
 
 let liveSession = null;
 let mediaStream = null;
@@ -18,12 +28,23 @@ let silentGainNode = null;
 let outputCtx = null;
 let nextPlayTime = 0;
 let destroyed = false;
+const activeOutputSources = [];
 
 const listeners = {
     status: null,
     log: null,
     connected: null
 };
+
+function resolveAccentId(accent) {
+    const a = String(accent || '').trim();
+    if (a === 'random') return ACCENT_IDS[Math.floor(Math.random() * ACCENT_IDS.length)];
+    return ACCENT_IDS.includes(a) ? a : 'us';
+}
+
+function pickRandomVoiceName() {
+    return VOICE_NAMES[Math.floor(Math.random() * VOICE_NAMES.length)];
+}
 
 function getSpeakingLevelConfig(level, score) {
     const resolvedLevel = SPEAKING_LEVELS.includes(level) ? level : getSpeakingLevelByScore(score);
@@ -116,7 +137,31 @@ function decodeBase64Pcm16(base64) {
     return new Int16Array(bytes.buffer);
 }
 
+function removeOutputSource(src) {
+    const i = activeOutputSources.indexOf(src);
+    if (i !== -1) activeOutputSources.splice(i, 1);
+}
+
+function stopAllOutputAudio() {
+    activeOutputSources.forEach((src) => {
+        try {
+            src.stop(0);
+        } catch {
+            /* already stopped */
+        }
+    });
+    activeOutputSources.length = 0;
+    if (outputCtx) {
+        nextPlayTime = outputCtx.currentTime;
+        outputCtx.close().catch(() => {});
+        outputCtx = null;
+    } else {
+        nextPlayTime = 0;
+    }
+}
+
 function playPcm16Chunk(base64Data, sampleRate = 24000) {
+    if (destroyed) return;
     if (!outputCtx) outputCtx = new AudioContext();
     const pcm16 = decodeBase64Pcm16(base64Data);
     const audioBuffer = outputCtx.createBuffer(1, pcm16.length, sampleRate);
@@ -125,22 +170,37 @@ function playPcm16Chunk(base64Data, sampleRate = 24000) {
     const src = outputCtx.createBufferSource();
     src.buffer = audioBuffer;
     src.connect(outputCtx.destination);
+    src.onended = () => removeOutputSource(src);
+    activeOutputSources.push(src);
     const now = outputCtx.currentTime;
     if (nextPlayTime < now) nextPlayTime = now;
     src.start(nextPlayTime);
     nextPlayTime += audioBuffer.duration;
 }
 
-async function connectLive(topic, score = 700, level = '') {
+async function connectLive(topic, score = 700, level = '', accent = 'random') {
     emitStatus(t('speakingConnecting'));
     const ai = new GoogleGenAI({ apiKey: state.apiKey });
     const levelConfig = getSpeakingLevelConfig(level, score);
     const levelLabel = t(levelConfig.labelKey);
+    const resolvedAccentId = resolveAccentId(accent);
+    const accentLine = ACCENT_INSTRUCTION[resolvedAccentId];
+    const voiceName = pickRandomVoiceName();
+
     const config = {
         responseModalities: [Modality.AUDIO],
         mediaResolution: MEDIA_RESOLUTION_LOW,
+        speechConfig: {
+            voiceConfig: {
+                prebuiltVoiceConfig: { voiceName }
+            }
+        },
         systemInstruction: `You are a TOEIC live speaking coach in an interactive conversation.
 Learner level: ${levelConfig.promptLevel}. Topic: "${topic}".
+
+Accent and delivery:
+- ${accentLine}
+- Stay intelligible and appropriate to the learner level; avoid caricature or offensive stereotyping.
 
 Conversation behavior:
 - Keep each assistant turn natural and not overly short, usually 2-4 sentences.
@@ -164,6 +224,8 @@ ${levelConfig.domains}`
                 state.speakingState.isConnected = true;
                 emitConnected(true);
                 emitLog('system', t('speakingTopicLevelLog', { topic, level: levelLabel }));
+                const accentLabel = t(`speakingAccentShort_${resolvedAccentId}`);
+                emitLog('system', t('speakingAccentVoiceLog', { accent: accentLabel, voice: voiceName }));
                 emitStatus(t('speakingConnectedPreparingMic'));
             },
             onmessage: (message) => {
@@ -198,6 +260,9 @@ ${levelConfig.domains}`
         }
     });
 
+    state.speakingState.resolvedAccentId = resolvedAccentId;
+    state.speakingState.liveVoiceName = voiceName;
+
     emitStatus(t('speakingAiOpening'));
     state.speakingState.isResponding = true;
     liveSession.sendClientContent({
@@ -206,6 +271,7 @@ ${levelConfig.domains}`
             parts: [{
                 text: `Start the conversation about "${topic}".
 Learner level is ${levelConfig.promptLevel}.
+Delivery: ${accentLine}
 ${levelConfig.opening}
 Keep your first response warm, useful, and specific instead of too brief.`
             }]
@@ -270,11 +336,9 @@ async function setupMicStream() {
     if (audioCtx.state === 'suspended') await audioCtx.resume();
     try {
         await setupMicWithWorklet();
-        emitLog('system', t('speakingAudioWorkletEnabled'));
     } catch (error) {
         console.warn('AudioWorklet unavailable, fallback ScriptProcessorNode', error);
         setupMicWithScriptProcessorFallback();
-        emitLog('system', t('speakingAudioWorkletFallback'));
     }
     state.speakingState.isRecording = true;
     emitStatus(t('speakingInProgress'));
@@ -284,6 +348,7 @@ export async function startSpeakingSession(input, callbacks = {}) {
     const topic = typeof input === 'string' ? input : String(input?.topic || '').trim();
     const score = typeof input === 'object' && input !== null ? Number(input.score) || 700 : 700;
     const level = typeof input === 'object' && input !== null ? String(input.level || '').trim() : '';
+    const accent = typeof input === 'object' && input !== null ? String(input.accent || 'random').trim() : 'random';
     if (!state.apiKey) throw new Error(t('alertSetApiKeyFirst'));
     if (!topic) throw new Error(t('alertSelectTopicFirst'));
     if (liveSession || mediaStream) await stopSpeakingSession();
@@ -295,13 +360,14 @@ export async function startSpeakingSession(input, callbacks = {}) {
     state.speakingState.finalTopic = topic;
     state.speakingState.isResponding = false;
 
-    await connectLive(topic, score, level);
+    await connectLive(topic, score, level, accent);
     await setupMicStream();
     emitLog('system', t('speakingSessionStarted'));
 }
 
 export async function stopSpeakingSession() {
     destroyed = true;
+    stopAllOutputAudio();
     if (workletNode) {
         workletNode.port.onmessage = null;
         workletNode.disconnect();
@@ -325,7 +391,7 @@ export async function stopSpeakingSession() {
         audioCtx = null;
     }
     if (mediaStream) {
-        mediaStream.getTracks().forEach(t => t.stop());
+        mediaStream.getTracks().forEach(tr => tr.stop());
         mediaStream = null;
     }
     if (liveSession) {
@@ -335,5 +401,7 @@ export async function stopSpeakingSession() {
     state.speakingState.isConnected = false;
     state.speakingState.isRecording = false;
     state.speakingState.isResponding = false;
+    state.speakingState.liveVoiceName = null;
+    state.speakingState.resolvedAccentId = null;
     emitConnected(false);
 }

@@ -1,6 +1,6 @@
 // App entry point: initialisation, tab switching, event binding, module wiring.
 
-import { state, VOICE_OPTIONS, VOICE_NAMES, ICONS } from './state.js';
+import { state, VOICE_OPTIONS, VOICE_NAMES, SPEAKING_ACCENT_OPTIONS, ICONS } from './state.js';
 import { speakText } from './utils.js';
 import { DB } from './db.js';
 import { fetchGeminiText, fetchGeminiTTS, fetchExamQuestions, fetchExamWrongAnswerExplanations } from './apiGemini.js';
@@ -200,13 +200,31 @@ function renderVoiceOptions() {
         chip.innerHTML = `<span>${t(opt.labelKey)}</span><span class="voice-desc">${t(opt.descKey)}</span>`;
         chip.onclick = () => {
             state.selectedVoice = opt.name;
-            document.querySelectorAll('.voice-chip').forEach((c) => c.classList.remove('active'));
+            voiceSelector.querySelectorAll('.voice-chip').forEach((c) => c.classList.remove('active'));
             chip.classList.add('active');
         };
         voiceSelector.appendChild(chip);
     });
 }
 renderVoiceOptions();
+
+const speakingAccentSelector = document.getElementById('speakingAccentSelector');
+function renderSpeakingAccentOptions() {
+    if (!speakingAccentSelector) return;
+    speakingAccentSelector.innerHTML = '';
+    SPEAKING_ACCENT_OPTIONS.forEach((opt) => {
+        const chip = document.createElement('div');
+        chip.className = `voice-chip ${opt.id === state.speakingState.accent ? 'active' : ''}`;
+        chip.innerHTML = `<span>${t(opt.labelKey)}</span><span class="voice-desc">${t(opt.descKey)}</span>`;
+        chip.onclick = () => {
+            state.speakingState.accent = opt.id;
+            speakingAccentSelector.querySelectorAll('.voice-chip').forEach((c) => c.classList.remove('active'));
+            chip.classList.add('active');
+        };
+        speakingAccentSelector.appendChild(chip);
+    });
+}
+renderSpeakingAccentOptions();
 
 /* ── Settings / API Key modal ── */
 const keyModal = document.getElementById('keyModal');
@@ -233,6 +251,7 @@ function applyLocaleToUI() {
     document.title = t('appTitle');
     setAnnouncementContent();
     renderVoiceOptions();
+    renderSpeakingAccentOptions();
     renderSpeakingLevelSwitch();
     const activeTopicChip = document.querySelector('#speakingPresetGroup .topic-chip.active');
     if (activeTopicChip?.dataset.topicKey) {
@@ -622,6 +641,9 @@ document.getElementById('btnStartSpeaking').onclick = async () => {
             title: topic,
             score: state.targetScore,
             speakingLevel: state.speakingState.level,
+            speakingAccent: state.speakingState.accent,
+            resolvedAccentId: null,
+            liveVoiceName: null,
             topic,
             startedAt: Date.now(),
             endedAt: null,
@@ -635,13 +657,23 @@ document.getElementById('btnStartSpeaking').onclick = async () => {
         setSpeakingStatus(t('speakingStatusInit'));
         document.getElementById('btnStartSpeaking').disabled = true;
         document.getElementById('btnStopSpeaking').disabled = false;
-        await startSpeakingSession({ topic, score: state.targetScore, level: state.speakingState.level }, {
+        await startSpeakingSession({
+            topic,
+            score: state.targetScore,
+            level: state.speakingState.level,
+            accent: state.speakingState.accent
+        }, {
             onStatus: (s) => setSpeakingStatus(s),
             onLog: (role, text) => appendSpeakingLog(role, text),
             onConnected: (connected) => {
                 document.getElementById('btnStopSpeaking').disabled = !connected;
             }
         });
+        if (activeSpeakingRecord) {
+            activeSpeakingRecord.resolvedAccentId = state.speakingState.resolvedAccentId;
+            activeSpeakingRecord.liveVoiceName = state.speakingState.liveVoiceName;
+            scheduleSpeakingPersist();
+        }
     } catch (error) {
         logError('Start speaking failed', error);
         setSpeakingStatus(t('speakingStartFailed', { message: toErrorMessage(error) }));
