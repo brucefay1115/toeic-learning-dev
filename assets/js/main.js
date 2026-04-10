@@ -290,6 +290,8 @@ async function persistLocaleSelection(locale) {
 
 document.getElementById('btnSettings').onclick = () => {
     document.getElementById('apiKeyInput').value = state.apiKey;
+    const btnClearApiKey = document.getElementById('btnClearApiKey');
+    if (btnClearApiKey) btnClearApiKey.classList.toggle('hidden', !state.apiKey);
     document.getElementById('btnCloseKeyModal').style.display = state.apiKey ? 'flex' : 'none';
     if (localeSelect) localeSelect.value = getLocale();
     DriveSync.updateUI();
@@ -299,22 +301,15 @@ document.getElementById('btnSettings').onclick = () => {
 async function saveApiKey() {
     const v = document.getElementById('apiKeyInput').value.trim();
     if (!v) {
-        alert(t('alertInvalidApiKey'));
+        state.apiKey = '';
+        await DB.setSetting('gemini_api_key', null);
+        document.getElementById('btnCloseKeyModal').style.display = 'none';
+        keyModal.classList.remove('active');
         return;
     }
     state.apiKey = v;
     await DB.setSetting('gemini_api_key', v);
     keyModal.classList.remove('active');
-}
-
-async function clearApiKey() {
-    const confirmed = confirm(t('confirmClearApiKey'));
-    if (!confirmed) return;
-    state.apiKey = '';
-    document.getElementById('apiKeyInput').value = '';
-    await DB.setSetting('gemini_api_key', null);
-    document.getElementById('btnCloseKeyModal').style.display = 'none';
-    alert(t('alertApiKeyCleared'));
 }
 
 function setAppVersionText(text) {
@@ -588,7 +583,22 @@ if (btnCloseAnnouncementModal && announcementModal) {
     btnCloseAnnouncementModal.onclick = () => announcementModal.classList.remove('active');
 }
 document.getElementById('btnSaveApiKey').onclick = async () => saveApiKey();
-document.getElementById('btnClearApiKey').onclick = () => clearApiKey();
+const apiKeyInput = document.getElementById('apiKeyInput');
+const btnClearApiKey = document.getElementById('btnClearApiKey');
+if (apiKeyInput) {
+    apiKeyInput.addEventListener('input', () => {
+        if (btnClearApiKey) btnClearApiKey.classList.toggle('hidden', !apiKeyInput.value);
+    });
+}
+if (btnClearApiKey) {
+    btnClearApiKey.onclick = () => {
+        if (apiKeyInput) {
+            apiKeyInput.value = '';
+            apiKeyInput.focus();
+        }
+        btnClearApiKey.classList.add('hidden');
+    };
+}
 document.getElementById('btnCloseKeyModal').onclick = () => keyModal.classList.remove('active');
 if (localeSelect) {
     localeSelect.onchange = async (event) => {

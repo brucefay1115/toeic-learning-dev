@@ -407,9 +407,9 @@
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78Zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
                     <span><span data-i18n="settingsGetApiKey">點此取得 Google API Key</span><br><span style="font-size:11px; font-weight:400;" data-i18n="settingsGoogleLoginHint">(需登入 Google 帳號)</span></span>
                 </a>
-                <div class="input-group">
-                    <input type="password" id="apiKeyInput" placeholder="Paste API Key here...">
-                    <button type="button" class="api-clear-btn" id="btnClearApiKey" data-i18n="settingsClear">一鍵清除</button>
+                <div class="input-group vocab-lookup-input-inner" style="margin-bottom: 20px;">
+                    <input type="password" id="apiKeyInput" style="padding-right: 32px;" placeholder="Paste API Key here...">
+                    <button type="button" id="btnClearApiKey" class="vocab-clear-btn hidden" aria-label="Clear input">&times;</button>
                 </div>
                 <p style="font-size: 12px; color: #999; margin-top: 10px;" data-i18n="settingsLocalStorageNote">Key 僅儲存於本地裝置 (IndexedDB)，不會備份到 Google Drive</p>
             </section>
